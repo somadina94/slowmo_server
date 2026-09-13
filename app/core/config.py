@@ -73,7 +73,18 @@ class Settings(BaseSettings):
 
     @property
     def cors_origin_list(self) -> list[str]:
-        return [item.strip() for item in self.cors_origins.split(",") if item.strip()]
+        items = [item.strip().rstrip("/") for item in self.cors_origins.split(",") if item.strip()]
+        web = (self.web_app_url or "").strip().rstrip("/")
+        if web and web not in items:
+            items.append(web)
+        # de-dupe, preserve order
+        seen: set[str] = set()
+        out: list[str] = []
+        for item in items:
+            if item not in seen:
+                seen.add(item)
+                out.append(item)
+        return out
 
     @property
     def trusted_host_list(self) -> list[str]:

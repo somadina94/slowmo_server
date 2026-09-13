@@ -47,6 +47,9 @@ def create_app(
         debug=resolved.app_debug,
     )
     application.add_middleware(SecurityHeadersMiddleware)
+    if resolved.is_prod:
+        # Inner: host checks must not run before CORS, or failed preflights omit ACAO headers.
+        application.add_middleware(TrustedHostMiddleware, allowed_hosts=resolved.trusted_host_list)
     application.add_middleware(
         CORSMiddleware,
         allow_origins=resolved.cors_origin_list,
@@ -54,8 +57,6 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    if resolved.is_prod:
-        application.add_middleware(TrustedHostMiddleware, allowed_hosts=resolved.trusted_host_list)
 
     @application.exception_handler(AppError)
     async def app_error_handler(_: Request, exc: AppError) -> JSONResponse:
