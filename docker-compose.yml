@@ -3,8 +3,8 @@
 #   cp .env.dev.example .env.dev   # if needed
 #   docker compose up --build --watch
 #
-# API:    http://localhost:5012
-# Health: http://localhost:5012/health
+# API:    http://localhost:${API_PORT}  (set API_PORT in .env.dev)
+# Health: http://localhost:${API_PORT}/health
 
 name: slowmo-api-dev
 
