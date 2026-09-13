@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -88,7 +89,33 @@ class Settings(BaseSettings):
 
     @property
     def trusted_host_list(self) -> list[str]:
-        return [item.strip() for item in self.trusted_hosts.split(",") if item.strip()]
+        hosts: list[str] = []
+        seen: set[str] = set()
+
+        def add(host: str) -> None:
+            cleaned = host.strip().lower().split(":")[0]
+            if not cleaned or cleaned in seen:
+                return
+            seen.add(cleaned)
+            hosts.append(cleaned)
+
+        for item in self.trusted_hosts.split(","):
+            add(item)
+
+        for origin in [*self.cors_origin_list, self.web_app_url, self.razorpay_webhook_url]:
+            hostname = urlparse(origin or "").hostname
+            if not hostname:
+                continue
+            add(hostname)
+            parts = hostname.split(".")
+            if len(parts) >= 2:
+                add("*." + ".".join(parts[-2:]))
+            if len(parts) >= 3:
+                add("*." + ".".join(parts[-3:]))
+
+        add("localhost")
+        add("127.0.0.1")
+        return hosts
 
     @property
     def is_sqlite(self) -> bool:

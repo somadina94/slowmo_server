@@ -50,6 +50,25 @@ def test_normalize_database_url_variants():
     assert Settings._normalize_database_url(None) is None
 
 
+def test_trusted_hosts_expand_from_web_and_cors():
+    from app.core.config import Settings
+
+    settings = Settings(
+        trusted_hosts="localhost",
+        cors_origins="https://slowmo.jahbyte.com,https://slowmo.jahbyte.com",
+        web_app_url="https://slowmo.jahbyte.com",
+        razorpay_webhook_url="https://api.slowmo.jahbyte.com/api/v1/webhooks/razorpay",
+    )
+    hosts = settings.trusted_host_list
+    assert "slowmo.jahbyte.com" in hosts
+    assert "api.slowmo.jahbyte.com" in hosts
+    assert "*.jahbyte.com" in hosts
+    assert "localhost" in hosts
+    assert settings.cors_origin_list.count("https://slowmo.jahbyte.com") == 1
+    bare = Settings(trusted_hosts="", cors_origins="not-a-url", web_app_url="", razorpay_webhook_url="")
+    assert "localhost" in bare.trusted_host_list
+
+
 def test_password_and_tokens():
     hashed = hash_password("secret123")
     assert verify_password("secret123", hashed)
