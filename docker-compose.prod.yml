@@ -26,7 +26,6 @@ services:
     environment:
       APP_ENV: prod
       APP_DEBUG: 'false'
-      DATABASE_URL: ${DATABASE_URL}
       STORAGE_DIR: /app/storage/rx
     volumes:
       - slowmo_rx_data:/app/storage/rx

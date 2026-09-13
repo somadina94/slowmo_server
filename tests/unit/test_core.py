@@ -38,6 +38,18 @@ def test_load_settings_prod_flags(tmp_path: Path):
     clear_settings_cache()
 
 
+def test_normalize_database_url_variants():
+    from app.core.config import Settings, normalize_database_url
+
+    assert normalize_database_url("'postgresql://u:p@h/db'") == "postgresql+psycopg://u:p@h/db"
+    assert normalize_database_url("postgres://u:p@h/db") == "postgresql+psycopg://u:p@h/db"
+    assert normalize_database_url("postgresql+psycopg://u:p@h/db") == "postgresql+psycopg://u:p@h/db"
+    assert normalize_database_url("sqlite:///./x.db") == "sqlite:///./x.db"
+    settings = Settings(database_url="postgresql://u:p@h/db")
+    assert settings.database_url.startswith("postgresql+psycopg://")
+    assert Settings._normalize_database_url(None) is None
+
+
 def test_password_and_tokens():
     hashed = hash_password("secret123")
     assert verify_password("secret123", hashed)

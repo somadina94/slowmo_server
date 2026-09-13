@@ -24,13 +24,15 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 ghcr_login() {
-  if [ -z "${GHCR_USERNAME:-}" ] || [ -z "${GHCR_TOKEN:-}" ]; then
+  user="${GHCR_USERNAME:-}"
+  token="${GHCR_TOKEN:-${GHCR_PULL_TOKEN:-}}"
+  if [ -z "$user" ] || [ -z "$token" ]; then
     echo "GHCR_USERNAME / GHCR_TOKEN not set — skipping docker login."
     echo "For private GHCR pulls, add a GitHub PAT (read:packages) to .env."
     return 0
   fi
-  echo "Logging in to ghcr.io as ${GHCR_USERNAME}..."
-  echo "${GHCR_TOKEN}" | "${DOCKER[@]}" login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+  echo "Logging in to ghcr.io as ${user}..."
+  echo "${token}" | "${DOCKER[@]}" login ghcr.io -u "${user}" --password-stdin
 }
 
 if [ -z "${DATABASE_URL:-}" ]; then

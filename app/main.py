@@ -36,6 +36,8 @@ def create_app(
     session_factory: sessionmaker | None = None,
 ) -> FastAPI:
     resolved = settings or get_settings()
+    if resolved.is_prod and resolved.is_sqlite:
+        raise RuntimeError("DATABASE_URL must be Postgres in production (sqlite is not allowed)")
     resolved_bind = bind if bind is not None else default_engine
     factory = session_factory or SessionLocal
     application = FastAPI(

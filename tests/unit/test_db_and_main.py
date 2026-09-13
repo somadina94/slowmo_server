@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
+import pytest
 
 from app.core.config import Settings, get_settings, load_settings, clear_settings_cache
 from app.core.db import get_db, make_engine, make_session_factory
@@ -54,7 +55,7 @@ def test_prod_app_health():
         cors_origins="http://test",
         seed_founder_email="",
         seed_founder_password="",
-        database_url="sqlite://",
+        database_url="postgresql+psycopg://u:p@localhost/db",
     )
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
@@ -66,3 +67,9 @@ def test_prod_app_health():
     app = create_app(settings=settings, bind=engine, session_factory=factory)
     with TestClient(app, base_url="http://testserver") as client:
         assert client.get("/health").json()["env"] == "prod"
+
+
+def test_prod_rejects_sqlite():
+    settings = Settings(app_env="prod", database_url="sqlite:///./nope.db")
+    with pytest.raises(RuntimeError, match="DATABASE_URL must be Postgres"):
+        create_app(settings=settings)

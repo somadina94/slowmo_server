@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -11,6 +11,15 @@ ROOT = Path(__file__).resolve().parents[2]
 def env_file_path(app_env: str) -> Path:
     name = "prod" if app_env == "prod" else "dev"
     return ROOT / f".env.{name}"
+
+
+def normalize_database_url(value: str) -> str:
+    url = (value or "").strip().strip("'\"")
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://") :]
+    if url.startswith("postgresql://") and not url.startswith("postgresql+"):
+        url = "postgresql+psycopg://" + url[len("postgresql://") :]
+    return url
 
 
 class Settings(BaseSettings):
@@ -54,6 +63,13 @@ class Settings(BaseSettings):
     otp_ttl_min: int = 10
     reset_ttl_min: int = 30
     otp_max_attempts: int = 5
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _normalize_database_url(cls, value: object) -> object:
+        if isinstance(value, str):
+            return normalize_database_url(value)
+        return value
 
     @property
     def cors_origin_list(self) -> list[str]:
