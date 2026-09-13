@@ -283,6 +283,52 @@ def test_inventory_and_orders(db: Session, settings: Settings):
     snap = inventory_service.snapshot(db)
     assert snap["skus"]
     inventory_service.receive(db, "SM-MB-10", 5, "restock", "B-TEST-1")
+    created_sku = inventory_service.create_sku(
+        db,
+        code="sm-mb-45",
+        name="Slow Mo · 45 pack",
+        pack_qty=45,
+        price=12000,
+        mrp=14000,
+        stock=10,
+        weekly_forecast=2,
+    )
+    assert any(row["sku"] == "SM-MB-45" for row in created_sku["skus"])
+    with pytest.raises(ConflictError):
+        inventory_service.create_sku(db, code="SM-MB-45", name="Dup", pack_qty=45, price=1, mrp=2)
+    with pytest.raises(ValidationAppError):
+        inventory_service.create_sku(db, code="", name="x", pack_qty=1, price=1, mrp=1)
+    with pytest.raises(ValidationAppError):
+        inventory_service.create_sku(db, code="X", name="x", pack_qty=0, price=1, mrp=1)
+    with pytest.raises(ValidationAppError):
+        inventory_service.create_sku(db, code="Y", name="y", pack_qty=1, price=5, mrp=4)
+    from app.models.product import Product
+    from app.repositories import inventory as inv_repo
+
+    # Cover path when catalog product is missing.
+    for product in list(db.query(Product).all()):
+        for variant in list(product.variants):
+            record = inv_repo.get_sku(db, variant.sku)
+            if record is not None:
+                for batch in list(record.batches):
+                    db.delete(batch)
+                for movement in list(record.movements):
+                    db.delete(movement)
+                db.delete(record)
+            db.delete(variant)
+        db.delete(product)
+    db.flush()
+    fresh = inventory_service.create_sku(
+        db,
+        code="SM-NEW-1",
+        name="New pack",
+        pack_qty=5,
+        price=100,
+        mrp=120,
+        label="New",
+        description="fresh",
+    )
+    assert any(row["sku"] == "SM-NEW-1" for row in fresh["skus"])
     with pytest.raises(NotFoundError):
         inventory_service.allocate(db, "NOPE", 1)
     with pytest.raises(NotFoundError):
@@ -290,17 +336,15 @@ def test_inventory_and_orders(db: Session, settings: Settings):
     with pytest.raises(NotFoundError):
         inventory_service.receive(db, "NOPE", 1, "x")
     with pytest.raises(ValidationAppError):
-        inventory_service.receive(db, "SM-MB-10", 0, "x")
-    sku = catalog_repo.get_variant_by_sku(db, "SM-MB-30")
+        inventory_service.receive(db, "SM-NEW-1", 0, "x")
+    sku = catalog_repo.get_variant_by_sku(db, "SM-NEW-1")
     assert sku
-    from app.repositories import inventory as inv_repo
-
-    record = inv_repo.get_sku(db, "SM-MB-30")
+    record = inv_repo.get_sku(db, "SM-NEW-1")
     record.stock = 0
     record.allocated = 0
     db.flush()
     with pytest.raises(ValidationAppError):
-        inventory_service.allocate(db, "SM-MB-30", 1)
+        inventory_service.allocate(db, "SM-NEW-1", 1)
     existing = order_repo.get_by_public_id(db, created.public_id)
     ids = iter([existing.public_id, "SM-NEW01"])
     assert order_service.next_public_id(db, maker=lambda: next(ids)) == "SM-NEW01"
@@ -331,14 +375,30 @@ def test_admin_and_shipping(db: Session, settings: Settings):
     assert evening["greeting"]
     assert admin_service.orders_page(db, "consult")["count"] >= 1
     assert admin_service.consults_page(db)["remaining"] >= 1
+    from app.models.consult import RxFile
+    from app.repositories import orders as order_repo
+
+    order_row = order_repo.get_by_public_id(db, created.public_id)
+    assert order_row is not None
+    order_row.rx_file = RxFile(
+        user_id=user.id,
+        filename="rx.pdf",
+        stored_name="rx.pdf",
+        mime="application/pdf",
+        size=10,
+        status="pending_verify",
+    )
+    db.flush()
+    assert admin_service.consults_page(db)["pending_rx"]
     admin_service.reschedule_consult(db, created.public_id, "Evening (5–9PM)", staff.id, notifier)
     admin_service.complete_consult(db, created.public_id, staff.id, "ok", notifier)
     with pytest.raises(NotFoundError):
         admin_service.complete_consult(db, "SM-000000", staff.id)
     with pytest.raises(NotFoundError):
         admin_service.reschedule_consult(db, "SM-000000", "x", staff.id)
+    admin_service.verify_rx(db, created.public_id, staff.id, True, notifier)
     with pytest.raises(NotFoundError):
-        admin_service.verify_rx(db, created.public_id, staff.id, True)
+        admin_service.verify_rx(db, "SM-000000", staff.id, False)
     customers = admin_service.customers_page(db, "cust")
     assert customers["total"] >= 1
     assert admin_service.analytics_page(db)["kpis"]

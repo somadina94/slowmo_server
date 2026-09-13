@@ -302,6 +302,21 @@ def test_webhook_and_admin(client: TestClient):
         json={"sku": "SM-MB-10", "qty": 3, "note": "box", "batch_code": "B-API-1"},
     )
     assert receipt.status_code == 200
+    created = client.post(
+        "/api/v1/admin/inventory/skus",
+        headers=staff,
+        json={
+            "sku": "SM-MB-45",
+            "name": "Slow Mo · 45 pack",
+            "pack_qty": 45,
+            "price": 12000,
+            "mrp": 14000,
+            "stock": 5,
+            "weekly_forecast": 1,
+        },
+    )
+    assert created.status_code == 200
+    assert any(row["sku"] == "SM-MB-45" for row in created.json()["skus"])
     patched = client.patch("/api/v1/admin/products/SM-MB-10", headers=staff, json={"price": 3290})
     assert patched.status_code == 200
     missing_sku = client.patch("/api/v1/admin/products/NOPE", headers=staff, json={"active": False})

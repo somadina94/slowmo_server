@@ -87,21 +87,37 @@ def orders_page(db: Session, status: str = "all", search: str = "") -> dict:
 
 
 def consults_page(db: Session) -> dict:
-    orders = [order for order in order_repo.list_all(db) if order.consult and order.consult.status == "scheduled"]
+    # Call queue: booked consults still open on unpaid-or-consult orders.
+    # RX-only preorders never create a Consult row — those land in pending_rx.
     cards = []
-    for order in orders:
-        cards.append(
-            {
-                "id": order.public_id,
-                "name": order.consult.name,
-                "phone": order.consult.phone,
-                "time": order.consult.slot or "Within 24 hrs",
-                "date": "Today",
-                "note": order.consult.reason or "No intake note",
-            }
-        )
+    pending_rx = []
     rxs = []
     for order in order_repo.list_all(db):
+        if (
+            order.consult
+            and order.consult.status == "scheduled"
+            and order.status in {"consult", "pending_payment", "hold"}
+        ):
+            cards.append(
+                {
+                    "id": order.public_id,
+                    "name": order.consult.name,
+                    "phone": order.consult.phone,
+                    "time": order.consult.slot or "Within 24 hrs",
+                    "date": "Today",
+                    "note": order.consult.reason or "No intake note",
+                    "order_status": order.status,
+                }
+            )
+        if order.rx_file and order.rx_file.status == "pending_verify":
+            pending_rx.append(
+                {
+                    "id": order.public_id,
+                    "name": order.ship_name,
+                    "file": order.rx_file.filename,
+                    "status": order.rx_file.status,
+                }
+            )
         if order.prescription:
             rxs.append(
                 {
@@ -113,7 +129,12 @@ def consults_page(db: Session) -> dict:
                     "status": order.prescription.status.title(),
                 }
             )
-    return {"consults": cards, "prescriptions": rxs, "remaining": len(cards)}
+    return {
+        "consults": cards,
+        "pending_rx": pending_rx,
+        "prescriptions": rxs,
+        "remaining": len(cards),
+    }
 
 
 def complete_consult(db: Session, public_id: str, actor_id: int, notes: str = "", notifier: Notifier | None = None) -> dict:
@@ -220,10 +241,11 @@ def analytics_page(db: Session) -> dict:
 
 
 def counts(db: Session) -> dict:
+    page = consults_page(db)
     orders = order_repo.list_all(db)
     return {
         "orders": len([order for order in orders if order.status == "consult"]),
-        "consults": len([order for order in orders if order.consult and order.consult.status == "scheduled"]),
+        "consults": page["remaining"] + len(page["pending_rx"]),
     }
 
 

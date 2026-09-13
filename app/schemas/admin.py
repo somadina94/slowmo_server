@@ -25,6 +25,18 @@ class InventoryReceipt(BaseModel):
     batch_code: str | None = None
 
 
+class SkuCreate(BaseModel):
+    sku: str
+    name: str
+    pack_qty: int
+    price: int
+    mrp: int
+    label: str = ""
+    description: str = ""
+    stock: int = 0
+    weekly_forecast: int = 0
+
+
 class StaffCreate(BaseModel):
     email: str
     password: str

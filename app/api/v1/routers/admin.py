@@ -5,7 +5,7 @@ from app.core.deps import CurrentStaff, DbDep, get_notifier, get_shipper, requir
 from app.models.user import User
 from app.integrations.notifications import Notifier
 from app.integrations.shipping import ShippingProvider
-from app.schemas.admin import ConsultAction, DispatchStageUpdate, InventoryReceipt, RescheduleConsult, StaffCreate
+from app.schemas.admin import ConsultAction, DispatchStageUpdate, InventoryReceipt, RescheduleConsult, SkuCreate, StaffCreate
 from app.schemas.auth import UserOut
 from app.schemas.orders import StatusUpdate
 from app.services import admin as admin_service
@@ -125,6 +125,28 @@ def admin_receipt(
     staff: User = Depends(require("inventory.write")),
 ) -> dict:
     result = inventory_service.receive(db, payload.sku, payload.qty, payload.note, payload.batch_code)
+    db.commit()
+    return result
+
+
+@router.post("/inventory/skus")
+def admin_create_sku(
+    payload: SkuCreate,
+    db: DbDep,
+    staff: User = Depends(require("inventory.write")),
+) -> dict:
+    result = inventory_service.create_sku(
+        db,
+        code=payload.sku,
+        name=payload.name,
+        pack_qty=payload.pack_qty,
+        price=payload.price,
+        mrp=payload.mrp,
+        label=payload.label,
+        description=payload.description,
+        stock=payload.stock,
+        weekly_forecast=payload.weekly_forecast,
+    )
     db.commit()
     return result
 

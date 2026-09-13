@@ -12,6 +12,12 @@ def list_skus(db: Session) -> list[Sku]:
     return list(db.scalars(select(Sku).order_by(Sku.id)))
 
 
+def add_sku(db: Session, sku: Sku) -> Sku:
+    db.add(sku)
+    db.flush()
+    return sku
+
+
 def list_batches(db: Session) -> list[Batch]:
     return list(db.scalars(select(Batch).order_by(Batch.id)))
 
