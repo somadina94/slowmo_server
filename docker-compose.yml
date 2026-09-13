@@ -1,0 +1,71 @@
+# Slow Mo API — local development
+#
+#   cp .env.dev.example .env.dev   # if needed
+#   docker compose up --build --watch
+#
+# API:    http://localhost:5012
+# Health: http://localhost:5012/health
+
+name: slowmo-api-dev
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: slowmo-api-dev
+    restart: unless-stopped
+    ports:
+      - '${API_PORT:-5012}:8000'
+    env_file:
+      - .env.dev
+    environment:
+      APP_ENV: dev
+      APP_DEBUG: 'true'
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/slowmo.dev.db}
+      STORAGE_DIR: /app/storage/rx
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5011,http://127.0.0.1:5011}
+      WEB_APP_URL: ${WEB_APP_URL:-http://localhost:5011}
+    volumes:
+      - slowmo_api_data:/app/data
+      - slowmo_rx_dev:/app/storage/rx
+    command:
+      [
+        'uvicorn',
+        'app.main:app',
+        '--host',
+        '0.0.0.0',
+        '--port',
+        '8000',
+        '--reload',
+        '--reload-dir',
+        '/app/app',
+      ]
+    develop:
+      watch:
+        - action: sync
+          path: ./app
+          target: /app/app
+        - action: sync
+          path: ./alembic
+          target: /app/alembic
+        - action: rebuild
+          path: ./requirements.txt
+        - action: rebuild
+          path: ./Dockerfile.dev
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:8000/health']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - slowmo-dev-network
+
+volumes:
+  slowmo_api_data:
+  slowmo_rx_dev:
+
+networks:
+  slowmo-dev-network:
+    driver: bridge

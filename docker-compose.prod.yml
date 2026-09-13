@@ -1,0 +1,47 @@
+# Slow Mo API — production
+#
+# Images are built on GitHub Actions and pulled from GHCR.
+# Local build fallback: DEPLOY_BUILD_LOCAL=1 ./deploy.sh
+#
+# Requires `.env` on the server (copy from `.env.prod.example`).
+#
+# Neon: set DATABASE_URL to your Neon Postgres connection string.
+# Neon does not provide object storage — Rx files use Backblaze B2
+# (STORAGE_BACKEND=b2 in `.env`).
+
+name: slowmo-api-prod
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${SLOWMO_API_IMAGE:-slowmo-api:prod}
+    container_name: slowmo-api-prod
+    restart: unless-stopped
+    ports:
+      - '${API_PORT:-5012}:8000'
+    env_file:
+      - .env
+    environment:
+      APP_ENV: prod
+      APP_DEBUG: 'false'
+      DATABASE_URL: ${DATABASE_URL}
+      STORAGE_DIR: /app/storage/rx
+    volumes:
+      - slowmo_rx_data:/app/storage/rx
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:8000/health']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+    networks:
+      - slowmo-prod-network
+
+volumes:
+  slowmo_rx_data:
+
+networks:
+  slowmo-prod-network:
+    driver: bridge

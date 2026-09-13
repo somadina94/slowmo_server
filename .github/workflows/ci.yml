@@ -1,0 +1,185 @@
+# =============================================================================
+# Slow Mo API — build on GitHub (GHCR), deploy with SSH password
+# =============================================================================
+#
+# Secrets (Settings → Secrets):
+#   GHCR_USERNAME          — GitHub username for ghcr.io login
+#   GHCR_TOKEN             — PAT with write:packages (push) + read:packages
+#   SERVER_HOST            — deploy host
+#   SERVER_USERNAME        — SSH user
+#   SERVER_PASSWORD        — SSH password (not an SSH key)
+#   SERVER_PORT            — optional, default 22
+#   SERVER_DEPLOY_PATH     — optional, default /root/slowmo-api
+#   PAT_TOKEN              — optional GitHub PAT for git pull on the server
+#
+# Variables (Settings → Variables):
+#   (none required for API)
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Import smoke check
+        run: python -c "from app.main import app; print('ok', app.title)"
+
+      - name: Unit + integration tests
+        run: python -m pytest -q
+
+      - name: Validate Docker Compose (prod)
+        run: |
+          cp .env.prod.example .env
+          echo "SLOWMO_API_IMAGE=slowmo-api:test" >> .env
+          echo "DATABASE_URL=postgresql+psycopg://user:pass@localhost/slowmo" >> .env
+          docker compose -f docker-compose.prod.yml --env-file .env config
+
+      - name: Build API image
+        run: docker build -t slowmo-api:test .
+
+      - name: Ensure deploy script is executable
+        run: |
+          chmod +x deploy.sh
+          test -x deploy.sh
+
+  push-image:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USERNAME }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+  deploy:
+    needs: push-image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    concurrency:
+      group: slowmo-api-prod-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          command_timeout: 30m
+          script: |
+            set -e
+
+            DEPLOY_PATH="${{ secrets.SERVER_DEPLOY_PATH }}"
+            if [ -z "$DEPLOY_PATH" ]; then
+              DEPLOY_PATH="/root/slowmo-api"
+            fi
+
+            if [ ! -d "$DEPLOY_PATH" ]; then
+              echo "Deploy directory not found: $DEPLOY_PATH"
+              exit 1
+            fi
+
+            cd "$DEPLOY_PATH"
+
+            if [ -n "${{ secrets.PAT_TOKEN }}" ]; then
+              git remote set-url origin https://${{ secrets.PAT_TOKEN }}@github.com/${{ github.repository }}.git
+              git fetch origin
+              git checkout "${{ github.ref_name }}"
+              git reset --hard "origin/${{ github.ref_name }}"
+              git clean -fd
+            fi
+
+            chmod +x ./deploy.sh
+
+            echo "Logging in to ghcr.io..."
+            if docker info >/dev/null 2>&1; then
+              echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io \
+                -u "${{ secrets.GHCR_USERNAME }}" \
+                --password-stdin
+            else
+              echo "${{ secrets.GHCR_TOKEN }}" | sudo docker login ghcr.io \
+                -u "${{ secrets.GHCR_USERNAME }}" \
+                --password-stdin
+            fi
+
+            export DEPLOY_BUILD_LOCAL=0
+            export SLOWMO_API_IMAGE="ghcr.io/${{ github.repository }}:latest"
+
+            if [ ! -f .env ]; then
+              echo "Missing .env on server at $DEPLOY_PATH — create it from .env.prod.example first."
+              exit 1
+            fi
+
+            if grep -q '^SLOWMO_API_IMAGE=' .env 2>/dev/null; then
+              sed -i.bak "s|^SLOWMO_API_IMAGE=.*|SLOWMO_API_IMAGE=${SLOWMO_API_IMAGE}|" .env
+            else
+              echo "SLOWMO_API_IMAGE=${SLOWMO_API_IMAGE}" >> .env
+            fi
+
+            if grep -q '^GHCR_USERNAME=' .env 2>/dev/null; then
+              sed -i.bak "s|^GHCR_USERNAME=.*|GHCR_USERNAME=${{ secrets.GHCR_USERNAME }}|" .env
+            else
+              echo "GHCR_USERNAME=${{ secrets.GHCR_USERNAME }}" >> .env
+            fi
+
+            if grep -q '^GHCR_TOKEN=' .env 2>/dev/null; then
+              sed -i.bak "s|^GHCR_TOKEN=.*|GHCR_TOKEN=${{ secrets.GHCR_TOKEN }}|" .env
+            else
+              echo "GHCR_TOKEN=${{ secrets.GHCR_TOKEN }}" >> .env
+            fi
+
+            rm -f .env.bak
+
+            docker rm -f slowmo-api-prod || true
+            ./deploy.sh
