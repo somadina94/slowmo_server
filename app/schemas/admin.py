@@ -43,3 +43,7 @@ class StaffCreate(BaseModel):
     name: str
     role: str
     phone: str = ""
+
+
+class StaffRoleUpdate(BaseModel):
+    role: str

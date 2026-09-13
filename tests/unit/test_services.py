@@ -3,13 +3,14 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import ConflictError, NotFoundError, UnauthorizedError, ValidationAppError
+from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, UnauthorizedError, ValidationAppError
 from app.core.config import Settings
 from app.integrations.notifications import Notifier
 from app.integrations.razorpay import RazorpayError, RazorpayGateway
 from app.integrations.shipping import StubShippingProvider, get_shipping_provider
 from app.integrations.storage import FileStorage, StorageError
 from app.repositories import catalog as catalog_repo
+from app.repositories import users as user_repo
 from app.schemas.orders import AddressIn, ConsultIn, OrderCreate
 from app.seed import seed
 from app.services import admin as admin_service
@@ -107,6 +108,18 @@ def test_auth_flow(db: Session, settings: Settings):
         auth_service.create_staff(db, "ops@test.com", "password1", "Ops", "ops")
     with pytest.raises(ValidationAppError):
         auth_service.create_staff(db, "x@test.com", "password1", "X", "nope")
+    founder_user = user_repo.get_by_email(db, settings.seed_founder_email)
+    assert founder_user
+    with pytest.raises(ValidationAppError):
+        auth_service.update_role(db, founder_user.id, "admin", founder_user)
+    auth_service.update_role(db, ops.id, "admin", founder_user)
+    assert ops.role == "admin"
+    with pytest.raises(ForbiddenError):
+        auth_service.update_role(db, ops.id, "founder", ops)
+    with pytest.raises(NotFoundError):
+        auth_service.update_role(db, 999999, "ops", founder_user)
+    with pytest.raises(ValidationAppError):
+        auth_service.update_role(db, ops.id, "nope", founder_user)
     forgot = auth_service.forgot_password(db, settings, "missing@test.com", notifier)
     assert "reset" in forgot.message.lower() or "email" in forgot.message.lower()
     sent = auth_service.forgot_password(db, settings, "priya@test.com", notifier)
@@ -138,7 +151,6 @@ def test_auth_flow(db: Session, settings: Settings):
     db.flush()
     with pytest.raises(UnauthorizedError):
         auth_service.verify_login(db, settings, expired.challenge_id, expired.debug_code or "123456")
-    from app.repositories import users as user_repo
 
     inactive_ch = auth_service.login(db, settings, "priya@test.com", "password2", notifier)
     user_row = user_repo.get_by_email(db, "priya@test.com")

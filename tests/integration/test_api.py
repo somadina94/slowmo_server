@@ -327,6 +327,36 @@ def test_webhook_and_admin(client: TestClient):
         json={"email": "clin@test.com", "password": "password1", "name": "Clin Ician", "role": "clinician"},
     )
     assert staff_user.status_code == 200
+    listed = client.get("/api/v1/admin/staff", headers=staff)
+    assert listed.status_code == 200
+    assert any(row["email"] == "clin@test.com" for row in listed.json())
+    role_patch = client.patch(
+        f"/api/v1/admin/staff/{staff_user.json()['id']}/role",
+        headers=staff,
+        json={"role": "ops"},
+    )
+    assert role_patch.status_code == 200
+    assert role_patch.json()["role"] == "ops"
+    founder_block = client.post(
+        "/api/v1/admin/staff",
+        headers=staff,
+        json={"email": "founder2@test.com", "password": "password1", "name": "F2", "role": "founder"},
+    )
+    # seed staff token is founder in tests - creating founder should succeed for founder
+    assert founder_block.status_code == 200
+    admin_user = client.post(
+        "/api/v1/admin/staff",
+        headers=staff,
+        json={"email": "adminuser@test.com", "password": "password1", "name": "Admin User", "role": "admin"},
+    )
+    assert admin_user.status_code == 200
+    admin_headers = auth_header(client, "adminuser@test.com", "password1", staff=True)
+    denied_founder = client.post(
+        "/api/v1/admin/staff",
+        headers=admin_headers,
+        json={"email": "sneaky@test.com", "password": "password1", "name": "Sneaky", "role": "founder"},
+    )
+    assert denied_founder.status_code == 403
     rx_user = client.post("/api/v1/auth/register", json={"email": "rx@test.com", "password": "password1", "name": "Rx User"})
     rx_headers = {"Authorization": f"Bearer {rx_user.json()['access_token']}"}
     uploaded = client.post("/api/v1/files/rx", headers=rx_headers, files={"file": ("p.png", b"pngdata", "image/png")})

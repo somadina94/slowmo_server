@@ -2,10 +2,20 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import PlainTextResponse
 
 from app.core.deps import CurrentStaff, DbDep, get_notifier, get_shipper, require
+from app.core.exceptions import ForbiddenError
 from app.models.user import User
 from app.integrations.notifications import Notifier
 from app.integrations.shipping import ShippingProvider
-from app.schemas.admin import ConsultAction, DispatchStageUpdate, InventoryReceipt, RescheduleConsult, SkuCreate, StaffCreate
+from app.repositories import users as user_repo
+from app.schemas.admin import (
+    ConsultAction,
+    DispatchStageUpdate,
+    InventoryReceipt,
+    RescheduleConsult,
+    SkuCreate,
+    StaffCreate,
+    StaffRoleUpdate,
+)
 from app.schemas.auth import UserOut
 from app.schemas.orders import StatusUpdate
 from app.services import admin as admin_service
@@ -204,13 +214,33 @@ def admin_manifest(
     return PlainTextResponse(admin_service.manifest(db, provider), media_type="text/csv")
 
 
+@router.get("/staff", response_model=list[UserOut])
+def admin_list_staff(db: DbDep, staff: User = Depends(require("admin.users"))) -> list[UserOut]:
+    return [UserOut.model_validate(row) for row in user_repo.list_staff(db)]
+
+
 @router.post("/staff", response_model=UserOut)
 def admin_create_staff(
     payload: StaffCreate,
     db: DbDep,
     staff: User = Depends(require("admin.users")),
 ) -> UserOut:
+    if payload.role == "founder" and staff.role != "founder":
+        raise ForbiddenError("Only a founder can create another founder")
     user = auth_service.create_staff(db, payload.email, payload.password, payload.name, payload.role, payload.phone)
+    db.commit()
+    db.refresh(user)
+    return UserOut.model_validate(user)
+
+
+@router.patch("/staff/{user_id}/role", response_model=UserOut)
+def admin_update_staff_role(
+    user_id: int,
+    payload: StaffRoleUpdate,
+    db: DbDep,
+    staff: User = Depends(require("admin.users")),
+) -> UserOut:
+    user = auth_service.update_role(db, user_id, payload.role, staff)
     db.commit()
     db.refresh(user)
     return UserOut.model_validate(user)

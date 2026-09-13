@@ -4,7 +4,7 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.core.exceptions import ConflictError, UnauthorizedError, ValidationAppError
+from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, UnauthorizedError, ValidationAppError
 from app.core.rbac import is_staff
 from app.core.security import (
     create_token,
@@ -274,3 +274,19 @@ def create_staff(db: Session, email: str, password: str, name: str, role: str, p
         initials=initials_for(name),
     )
     return user_repo.add(db, user)
+
+
+def update_role(db: Session, user_id: int, role: str, actor: User) -> User:
+    if role not in {"founder", "ops", "clinician", "admin", "customer"}:
+        raise ValidationAppError("Invalid role")
+    if role == "founder" and actor.role != "founder":
+        raise ForbiddenError("Only a founder can assign the founder role")
+    user = user_repo.get_by_id(db, user_id)
+    if user is None:
+        raise NotFoundError("User not found")
+    if user.role == "founder" and role != "founder":
+        founders = [row for row in user_repo.list_staff(db) if row.role == "founder"]
+        if len(founders) <= 1:
+            raise ValidationAppError("Cannot remove the last founder")
+    user.role = role
+    return user
